@@ -1,0 +1,28 @@
+dryRun: false
+equipment: 97
+syncDatabase: SS800
+metadata:
+  jdbcUrl: jdbc:postgresql://172.16.70.156:5432/binlog?user=postgres&password=postgres
+  maximumPoolSize: 1
+binlogLocation: C:\\Users\\liys106483\\Desktop\\mysql-bin
+initialDdl: 
+initialEntryPosition:
+  fileName: mysql-bin.000029
+  position: 4
+binlogPositionPersistStep: 1
+binlogFileDelayCount: 0
+kafka:
+  sendSizeThresholdBytes: 104857600
+  topic:
+    name: TEST_CANAL
+    replicationFactor: 1
+    properties:
+      cleanup.policy: delete
+      retention.ms: 1
+      min.insync.replicas: 1
+      max.message.bytes: 204857600
+  properties:
+    bootstrap.servers: 172.16.70.202:9092
+    max.request.size: 104857600
+quirks:
+  seekLatestBinlogFromZero: true

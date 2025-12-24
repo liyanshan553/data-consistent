@@ -1,0 +1,19 @@
+equipment: 97
+targetDatabase:
+  jdbcUrl: jdbc:mysql://localhost:3306/test_canal?user=root&password=1142595904
+  driverClassName: com.mysql.jdbc.Driver
+metadata:
+  longhorn:
+    enabled: false
+    endpoint: http://localhost:8849/
+    volume: mysql-ssa800w0-data
+    updateBatch: 1000
+  database:
+    jdbcUrl: jdbc:postgresql://172.16.70.156:5432/binlog?user=postgres&password=postgres
+    maximumPoolSize: 2
+kafka:
+  topic: TEST_CANAL
+  pollTimeout: 2000
+  initialOffset: 0
+  properties:
+    bootstrap.servers: 172.16.70.202:9092
