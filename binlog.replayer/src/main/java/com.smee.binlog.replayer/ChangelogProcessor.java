@@ -153,8 +153,9 @@ public class ChangelogProcessor {
                 targetDb.execute(sqlWithPos.getSql());
                 LOG.info("kafka offset {} position {}", record.offset(), sqlWithPos.getPosition());
                 if (forceMeta) {
-                    positionManager.savePosition(currWatermark, offset); // 写PG :contentReference[oaicite:5]{index=5}
+                    positionManager.savePosition(currWatermark, record.offset()); // 写PG :contentReference[oaicite:5]{index=5}
                     updateMetadataDbCounter.set(0);
+                    updateLonghornSnapshot(currWatermark, record.offset());
                 } else {
                     updateMetadata(currWatermark, record.offset());        // 旧逻辑(带门控)
                 }
@@ -213,6 +214,7 @@ public class ChangelogProcessor {
         positionManager.savePosition(currWatermark, offset); // 写PG :contentReference[oaicite:5]{index=5}
         consumer.commitSync();                               // commit kafka offset :contentReference[oaicite:6]{index=6}
         updateMetadataDbCounter.set(0);                      // 避免门控状态干扰
+        updateLonghornSnapshot(currWatermark, offset);
     }
 
 
