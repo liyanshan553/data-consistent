@@ -96,6 +96,51 @@ public class SqlExecutor {
         }
     }
 
+    public void executeBatchIgnoreDuplicateKey(List<String> sqlList) throws SQLException {
+        java.sql.Connection conn = null;
+        try {
+            conn = db.getConnection();
+            conn.setAutoCommit(false);
+
+            try (var stmt = conn.createStatement()) {
+                for (String sql : sqlList) {
+                    try {
+                        stmt.execute(sql);
+                    } catch (SQLException e) {
+                        if (isDuplicateKeyException(e)) {
+                            continue;
+                        }
+                        throw e;
+                    }
+                }
+            }
+
+            conn.commit();
+        } catch (SQLException e) {
+            if (conn != null) {
+                try {
+                    conn.rollback();
+                } catch (SQLException ignored) {
+                }
+            }
+            throw e;
+        } finally {
+            if (conn != null) {
+                try {
+                    conn.close();
+                } catch (SQLException ignored) {
+                }
+            }
+        }
+    }
+
+    private boolean isDuplicateKeyException(SQLException ex) {
+        if (ex instanceof java.sql.SQLIntegrityConstraintViolationException) {
+            return true;
+        }
+        return ex.getErrorCode() == 1062 || "23000".equals(ex.getSQLState());
+    }
+
     public boolean execute(String sql, List<Object> values) throws SQLException {
         var retryRun = Retry.decorateCheckedSupplier(RETRY_REGISTRY.retry(STMT_RETRY_POLICY_NAME),
                 () -> {

@@ -200,13 +200,23 @@ public class ChangelogProcessor {
 
             LOG.info("[BATCH] success, offset {} lastPos {}", record.offset(), last.getPosition());
         } catch (SQLException batchEx) {
-            LOG.error("[BATCH] failed, will rollback and degrade to single. offset {}", record.offset(), batchEx);
+            LOG.warn("[BATCH] failed, trying duplicate-tolerant replay. offset {}", record.offset(), batchEx);
+            try {
+                targetDb.executeBatchIgnoreDuplicateKey(sqls);
+                SqlWithPos last = toExec.get(toExec.size() - 1);
+                BinlogWatermark lastWm = BinlogWatermark.parse(last.getPosition());
+                savePositionAndCommit(lastWm, record.offset());
+                prevWatermark = lastWm;
+                LOG.info("[BATCH] duplicate-tolerant success, offset {} lastPos {}", record.offset(), last.getPosition());
+            } catch (SQLException retryEx) {
+                LOG.error("[BATCH] duplicate-tolerant replay failed, degrade to single. offset {}", record.offset(), retryEx);
 
-            // 4) 降级单条：强制每条成功都落PG点位；遇到不可处理错误仍会 throw 终止（符合你的方案）
-            reduceMessages(record, true);
+                // 4) 降级单条：强制每条成功都落PG点位；遇到不可处理错误仍会 throw 终止（符合你的方案）
+                reduceMessages(record, true);
 
-            // 如果 reduceMessages 全部成功，说明 batch 失败可能是 JDBC batch/驱动层问题；
-            // 这时你可以选择继续 batch 或继续单条。按你方案可继续 batch（这里不额外处理）。
+                // 如果 reduceMessages 全部成功，说明 batch 失败可能是 JDBC batch/驱动层问题；
+                // 这时你可以选择继续 batch 或继续单条。按你方案可继续 batch（这里不额外处理）。
+            }
         }
     }
 
