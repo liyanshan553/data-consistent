@@ -153,8 +153,9 @@ public class ChangelogProcessor {
                 targetDb.execute(sqlWithPos.getSql());
                 LOG.info("kafka offset {} position {}", record.offset(), sqlWithPos.getPosition());
                 if (forceMeta) {
-                    positionManager.savePosition(currWatermark, offset); // 写PG :contentReference[oaicite:5]{index=5}
+                    positionManager.savePosition(currWatermark, record.offset()); // 写PG :contentReference[oaicite:5]{index=5}
                     updateMetadataDbCounter.set(0);
+                    updateLonghornSnapshot(currWatermark, record.offset());
                 } else {
                     updateMetadata(currWatermark, record.offset());        // 旧逻辑(带门控)
                 }
@@ -199,13 +200,23 @@ public class ChangelogProcessor {
 
             LOG.info("[BATCH] success, offset {} lastPos {}", record.offset(), last.getPosition());
         } catch (SQLException batchEx) {
-            LOG.error("[BATCH] failed, will rollback and degrade to single. offset {}", record.offset(), batchEx);
+            LOG.warn("[BATCH] failed, trying duplicate-tolerant replay. offset {}", record.offset(), batchEx);
+            try {
+                targetDb.executeBatchIgnoreDuplicateKey(sqls);
+                SqlWithPos last = toExec.get(toExec.size() - 1);
+                BinlogWatermark lastWm = BinlogWatermark.parse(last.getPosition());
+                savePositionAndCommit(lastWm, record.offset());
+                prevWatermark = lastWm;
+                LOG.info("[BATCH] duplicate-tolerant success, offset {} lastPos {}", record.offset(), last.getPosition());
+            } catch (SQLException retryEx) {
+                LOG.error("[BATCH] duplicate-tolerant replay failed, degrade to single. offset {}", record.offset(), retryEx);
 
-            // 4) 降级单条：强制每条成功都落PG点位；遇到不可处理错误仍会 throw 终止（符合你的方案）
-            reduceMessages(record, true);
+                // 4) 降级单条：强制每条成功都落PG点位；遇到不可处理错误仍会 throw 终止（符合你的方案）
+                reduceMessages(record, true);
 
-            // 如果 reduceMessages 全部成功，说明 batch 失败可能是 JDBC batch/驱动层问题；
-            // 这时你可以选择继续 batch 或继续单条。按你方案可继续 batch（这里不额外处理）。
+                // 如果 reduceMessages 全部成功，说明 batch 失败可能是 JDBC batch/驱动层问题；
+                // 这时你可以选择继续 batch 或继续单条。按你方案可继续 batch（这里不额外处理）。
+            }
         }
     }
 
@@ -213,6 +224,7 @@ public class ChangelogProcessor {
         positionManager.savePosition(currWatermark, offset); // 写PG :contentReference[oaicite:5]{index=5}
         consumer.commitSync();                               // commit kafka offset :contentReference[oaicite:6]{index=6}
         updateMetadataDbCounter.set(0);                      // 避免门控状态干扰
+        updateLonghornSnapshot(currWatermark, offset);
     }
 
 
