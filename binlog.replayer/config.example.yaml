@@ -1,6 +1,8 @@
 equipment: 97
 targetDatabase:
-  jdbcUrl: jdbc:mysql://localhost:3306/test_canal?user=root&password=1142595904
+  # continueBatchOnError=true: 批量执行遇到错误时继续执行剩余SQL，实现重复键容错
+  # rewriteBatchedStatements=true: 将多条SQL合并为一条批量语句，提升性能
+  jdbcUrl: jdbc:mysql://localhost:3306/test_canal?user=root&password=1142595904&continueBatchOnError=true&rewriteBatchedStatements=true
   driverClassName: com.mysql.jdbc.Driver
 metadata:
   longhorn:

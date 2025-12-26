@@ -153,7 +153,7 @@ public class ChangelogProcessor {
                 targetDb.execute(sqlWithPos.getSql());
                 LOG.info("kafka offset {} position {}", record.offset(), sqlWithPos.getPosition());
                 if (forceMeta) {
-                    positionManager.savePosition(currWatermark, offset); // 写PG :contentReference[oaicite:5]{index=5}
+                    positionManager.savePosition(currWatermark, record.offset());
                     updateMetadataDbCounter.set(0);
                 } else {
                     updateMetadata(currWatermark, record.offset());        // 旧逻辑(带门控)
@@ -184,29 +184,26 @@ public class ChangelogProcessor {
                 toExec.add(s);
             }
         }
-        if (toExec.isEmpty()) return;
-
-        // 2) 批量执行（单事务）
-        List<String> sqls = toExec.stream().map(SqlWithPos::getSql).collect(java.util.stream.Collectors.toList());
-        try {
-            targetDb.executeBatch(sqls);
-
-            // 3) 批量成功：只写最后一个点位（你要的行为）
-            SqlWithPos last = toExec.get(toExec.size() - 1);
-            BinlogWatermark lastWm = BinlogWatermark.parse(last.getPosition());
-            savePositionAndCommit(lastWm, record.offset());
-            prevWatermark = lastWm;
-
-            LOG.info("[BATCH] success, offset {} lastPos {}", record.offset(), last.getPosition());
-        } catch (SQLException batchEx) {
-            LOG.error("[BATCH] failed, will rollback and degrade to single. offset {}", record.offset(), batchEx);
-
-            // 4) 降级单条：强制每条成功都落PG点位；遇到不可处理错误仍会 throw 终止（符合你的方案）
-            reduceMessages(record, true);
-
-            // 如果 reduceMessages 全部成功，说明 batch 失败可能是 JDBC batch/驱动层问题；
-            // 这时你可以选择继续 batch 或继续单条。按你方案可继续 batch（这里不额外处理）。
+        if (toExec.isEmpty()) {
+            consumer.commitSync();
+            return;
         }
+
+        // 2) 批量执行（支持重复键容错，不再需要降级）
+        List<String> sqls = toExec.stream().map(SqlWithPos::getSql).collect(java.util.stream.Collectors.toList());
+
+        // executeBatch 内部会处理 Duplicate Key 异常并跳过，只有不可跳过的异常才会抛出
+        SqlExecutor.BatchResult result = targetDb.executeBatch(sqls);
+
+        // 3) 批量完成：写最后一个点位
+        SqlWithPos last = toExec.get(toExec.size() - 1);
+        BinlogWatermark lastWm = BinlogWatermark.parse(last.getPosition());
+        savePositionAndCommit(lastWm, record.offset());
+        prevWatermark = lastWm;
+
+        LOG.info("[BATCH] completed, offset={} lastPos={} total={} success={} skipped={}",
+                record.offset(), last.getPosition(),
+                result.getTotalCount(), result.getSuccessCount(), result.getSkippedCount());
     }
 
     private void savePositionAndCommit(BinlogWatermark currWatermark, long offset) throws Exception {
